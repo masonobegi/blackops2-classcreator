@@ -1,0 +1,12 @@
+{
+  "name": "jack-meme",
+  "version": "1.0.0",
+  "description": "jack meme with looping fart noise",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
