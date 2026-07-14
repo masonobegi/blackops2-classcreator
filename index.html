@@ -9,7 +9,7 @@
   html, body {
     margin: 0;
     height: 100%;
-    background: #0c0d0f;
+    background: #0a0b0d;
     overflow: hidden;
     font-family: "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
     color: #d7d9dc;
@@ -17,176 +17,81 @@
     user-select: none;
   }
 
-  /* ===================== BO2 CREATE-A-CLASS SCREEN ===================== */
+  /* ===================== MINIMAL BO2 HOME SCREEN ===================== */
   #bo2 {
     position: fixed;
     inset: 0;
     z-index: 20;
     display: flex;
     flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
     background:
-      radial-gradient(120% 80% at 50% -10%, #23262b 0%, #121417 55%, #0a0b0d 100%);
+      radial-gradient(130% 90% at 50% 30%, #1c1f24 0%, #101216 55%, #08090b 100%);
   }
 
-  /* top bar */
-  .topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 26px;
-    border-bottom: 2px solid #f7941e;
-    background: linear-gradient(180deg, rgba(20,22,25,.9), rgba(12,13,15,.6));
-  }
-  .topbar .title {
-    font-size: 26px;
+  .logo {
+    font-size: clamp(30px, 7vw, 64px);
     font-weight: 800;
-    letter-spacing: 4px;
+    letter-spacing: clamp(6px, 2vw, 16px);
     text-transform: uppercase;
     color: #f4f5f6;
+    line-height: 1.05;
   }
-  .topbar .title span { color: #f7941e; }
-  .points {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+  .logo .ii { color: #f7941e; }
+  .subtitle {
+    margin-top: 14px;
+    font-size: clamp(13px, 2.4vw, 18px);
+    letter-spacing: clamp(4px, 1.4vw, 9px);
     text-transform: uppercase;
-    letter-spacing: 2px;
-    font-size: 14px;
-    color: #9aa0a6;
-  }
-  .points b {
-    font-size: 30px;
-    color: #f7941e;
-    line-height: 1;
-  }
-  /* pick-10 allocation dots */
-  .alloc { display: flex; gap: 4px; }
-  .alloc i {
-    width: 12px; height: 18px;
-    display: block;
-    background: #f7941e;
-    clip-path: polygon(20% 0, 100% 0, 80% 100%, 0 100%);
-    opacity: .95;
-  }
-  .alloc i.empty { background: #3a3d42; }
-
-  /* main body */
-  .body {
-    flex: 1;
-    display: grid;
-    grid-template-columns: 230px 1fr;
-    min-height: 0;
-  }
-
-  /* class list */
-  .classes {
-    border-right: 1px solid #24272c;
-    padding: 18px 0;
-    overflow-y: auto;
-    background: rgba(0,0,0,.25);
-  }
-  .classes .hdr {
-    padding: 0 22px 12px;
-    font-size: 12px;
-    letter-spacing: 3px;
-    color: #6b7075;
-    text-transform: uppercase;
-  }
-  .class-item {
-    padding: 13px 22px;
-    font-size: 17px;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-    color: #b9bdc2;
-    border-left: 3px solid transparent;
-    cursor: pointer;
-  }
-  .class-item small { display:block; font-size:11px; letter-spacing:2px; color:#6b7075; }
-  .class-item:hover { background: rgba(247,148,30,.06); color:#e7e9ec; }
-  .class-item.active {
-    background: linear-gradient(90deg, rgba(247,148,30,.18), transparent);
-    border-left-color: #f7941e;
-    color: #fff;
-  }
-
-  /* loadout grid */
-  .loadout {
-    padding: 22px 26px;
-    overflow-y: auto;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    grid-auto-rows: min-content;
-    gap: 14px;
-    align-content: start;
-  }
-  .slot {
-    background: linear-gradient(160deg, #1b1e23, #14161a);
-    border: 1px solid #2a2e34;
-    border-left: 3px solid #f7941e;
-    padding: 12px 14px;
-    min-height: 74px;
-    cursor: pointer;
-    transition: border-color .12s, transform .12s;
-  }
-  .slot:hover { border-color:#f7941e; transform: translateY(-2px); }
-  .slot .label {
-    font-size: 11px;
-    letter-spacing: 2px;
-    color: #6b7075;
-    text-transform: uppercase;
-  }
-  .slot .name {
-    margin-top: 6px;
-    font-size: 19px;
-    font-weight: 700;
-    letter-spacing: .5px;
-    color: #eef0f2;
-    text-transform: uppercase;
-  }
-  .slot .attach {
-    margin-top: 4px;
-    font-size: 12px;
     color: #8b9096;
-    letter-spacing: 1px;
   }
-  .slot.wild { border-left-color:#4fa3ff; }
-  .slot.wild .name { color:#bcd9ff; }
 
-  /* bottom bar */
-  .bottom {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 26px;
-    border-top: 1px solid #24272c;
-    background: linear-gradient(0deg, rgba(20,22,25,.9), rgba(12,13,15,.4));
+  .rule {
+    width: min(360px, 70vw);
+    height: 2px;
+    margin: 34px 0 30px;
+    background: linear-gradient(90deg, transparent, #f7941e, transparent);
   }
-  .hint { font-size: 12px; letter-spacing: 2px; color: #6b7075; text-transform: uppercase; }
-  .hint b { color:#9aa0a6; }
+
   #enter {
     appearance: none;
     border: none;
     cursor: pointer;
     font-family: inherit;
-    font-size: 20px;
+    font-size: clamp(18px, 3vw, 24px);
     font-weight: 800;
-    letter-spacing: 3px;
+    letter-spacing: 4px;
     text-transform: uppercase;
     color: #10120f;
     background: linear-gradient(180deg, #ffb347, #f7941e);
-    padding: 14px 40px;
-    clip-path: polygon(8% 0, 100% 0, 92% 100%, 0 100%);
-    box-shadow: 0 0 0 1px rgba(247,148,30,.4), 0 6px 20px rgba(247,148,30,.25);
+    padding: 15px 54px;
+    clip-path: polygon(7% 0, 100% 0, 93% 100%, 0 100%);
+    box-shadow: 0 0 0 1px rgba(247,148,30,.4), 0 8px 26px rgba(247,148,30,.22);
   }
   #enter:hover { filter: brightness(1.08); }
   #enter:active { transform: translateY(2px); }
 
-  @media (max-width: 640px) {
-    .body { grid-template-columns: 128px 1fr; }
-    .topbar .title { font-size: 18px; letter-spacing: 2px; }
-    .points b { font-size: 22px; }
-    .loadout { grid-template-columns: 1fr 1fr; padding: 14px; gap: 10px; }
-    #enter { font-size: 16px; padding: 12px 24px; }
+  .press {
+    margin-top: 22px;
+    font-size: 12px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: #5a5f65;
+    animation: blink 1.6s ease-in-out infinite;
+  }
+  @keyframes blink { 0%,100%{opacity:.3} 50%{opacity:1} }
+
+  .foot {
+    position: fixed;
+    bottom: 16px;
+    width: 100%;
+    text-align: center;
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: #3f4348;
+    text-transform: uppercase;
   }
 
   /* ===================== MEME LAYER (revealed on ENTER) ===================== */
@@ -214,46 +119,14 @@
     <audio id="fart" src="fart.mp3" loop></audio>
   </div>
 
-  <!-- Fake Black Ops 2 Create-A-Class screen -->
+  <!-- Minimal Black Ops II home screen -->
   <div id="bo2">
-    <div class="topbar">
-      <div class="title">CREATE-A-<span>CLASS</span></div>
-      <div class="points">
-        <span>ALLOCATION</span>
-        <div class="alloc">
-          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-        </div>
-        <b>10</b>
-      </div>
-    </div>
-
-    <div class="body">
-      <div class="classes">
-        <div class="hdr">Custom Classes</div>
-        <div class="class-item active">Class 1 <small>CUSTOM</small></div>
-        <div class="class-item">Class 2 <small>CUSTOM</small></div>
-        <div class="class-item">Class 3 <small>CUSTOM</small></div>
-        <div class="class-item">Class 4 <small>CUSTOM</small></div>
-        <div class="class-item">Class 5 <small>CUSTOM</small></div>
-        <div class="class-item">Class 6 <small>LOCKED</small></div>
-      </div>
-
-      <div class="loadout">
-        <div class="slot"><div class="label">Primary</div><div class="name">M8A1</div><div class="attach">Reflex · Select Fire</div></div>
-        <div class="slot"><div class="label">Secondary</div><div class="name">Tac-45</div><div class="attach">Fast Mag</div></div>
-        <div class="slot"><div class="label">Perk 1</div><div class="name">Lightweight</div></div>
-        <div class="slot"><div class="label">Perk 2</div><div class="name">Toughness</div></div>
-        <div class="slot"><div class="label">Perk 3</div><div class="name">Dexterity</div></div>
-        <div class="slot"><div class="label">Lethal</div><div class="name">Bouncing Betty</div></div>
-        <div class="slot"><div class="label">Tactical</div><div class="name">Concussion</div></div>
-        <div class="slot wild"><div class="label">Wildcard</div><div class="name">Perk 1 Greed</div></div>
-      </div>
-    </div>
-
-    <div class="bottom">
-      <div class="hint">Loadout ready · <b>Press ENTER to deploy</b></div>
-      <button id="enter">ENTER ▸</button>
-    </div>
+    <div class="logo">BLACK OPS <span class="ii">II</span></div>
+    <div class="subtitle">Create-A-Class</div>
+    <div class="rule"></div>
+    <button id="enter">ENTER</button>
+    <div class="press">Press to deploy</div>
+    <div class="foot">© Activision · Treyarch</div>
   </div>
 
   <script>
