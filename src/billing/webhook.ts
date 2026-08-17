@@ -144,14 +144,27 @@ function normalizeSubscription(object: Record<string, unknown>): StripeSubscript
     current_period_end: object['current_period_end'] as number | undefined,
     cancel_at_period_end: object['cancel_at_period_end'] as boolean | undefined,
     items: (object['items'] as StripeSubscription['items']) ?? { data: [] },
+    metadata: object['metadata'] as Record<string, string> | undefined,
   };
 }
 
+/**
+ * Map a subscription back to an account, by customer id and then by the
+ * metadata we stamped on it at checkout.
+ *
+ * The metadata fallback matters because subscription events can arrive before
+ * (or instead of) the checkout session that would have recorded the customer
+ * id — and an event we cannot attribute is a customer who paid and got nothing.
+ */
 function resolveUser(db: Database, subscription: StripeSubscription): string | null {
   if (subscription.customer) {
     const byCustomer = findUserByStripeCustomer(db, subscription.customer);
     if (byCustomer) return byCustomer.id;
   }
+
+  const fromMetadata = subscription.metadata?.['driftwatch_user_id'];
+  if (fromMetadata && findUserById(db, fromMetadata)) return fromMetadata;
+
   return null;
 }
 

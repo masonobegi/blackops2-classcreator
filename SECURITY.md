@@ -73,8 +73,17 @@ least-privilege tokens (the monitor form says so).
   log or browser history.
 - **CSRF**: every mutating form carries a per-session token, checked with a
   constant-time compare, on top of `SameSite=Lax`.
-- **Rate limits**: 5 sign-in emails per 15 minutes per IP+address; 60 writes per
-  minute per session.
+- **Rate limits**: sign-in emails are capped twice over — 5 per 15 minutes per
+  client IP *and* 5 per hour per email address. The address-keyed limit is the
+  one that matters: a client-supplied `X-Forwarded-For` can rotate the IP key at
+  will, but cannot change whose mailbox is being flooded. Beyond that, 60 writes
+  per minute per session and 300 REST API requests per minute per account.
+- **Proxy trust**: `TRUST_PROXY` (default on) decides whether
+  `X-Forwarded-For` is believed. Set it to `0` when the process is directly
+  exposed, or a client can pick its own rate-limit bucket.
+- **Erasure**: Settings has a self-serve account delete that cascades to every
+  table. It refuses while a paid subscription is still live, so an orphaned
+  subscription cannot keep charging someone we can no longer identify.
 
 Login deliberately does not reveal whether an address already has an account —
 requesting a link and signing up are the same action.
@@ -101,6 +110,13 @@ plan indefinitely.
   explicit `raw()` call, making XSS opt-in rather than default.
 - The Content-Security-Policy is `default-src 'none'` with no script source at
   all. There is no client-side JavaScript, so nothing needs relaxing.
+- One exception is load-bearing: `form-action` names
+  `https://checkout.stripe.com` and `https://billing.stripe.com`. Chrome and
+  Safari apply that directive to the *redirect target* of a form submission, so a
+  bare `'self'` silently blocks the hop from `POST /billing/checkout` to Stripe
+  Checkout — the failure mode is that nobody can pay, with nothing in the server
+  logs. If you add another payment or auth redirect reached from a form, it needs
+  to be listed here too.
 - Response bodies from monitored APIs are **never echoed back** — only inferred
   types and field names. A monitored endpoint returning a customer's PII does not
   put that PII in an alert email.
@@ -112,7 +128,9 @@ plan indefinitely.
 - Probe responses are capped at `PROBE_MAX_BYTES` (2 MB), enforced both from
   `Content-Length` and while streaming, and the stream is cancelled on breach.
 - Probe timeout is 15s; alert delivery timeout is 15s.
-- Request bodies to *our* endpoints are capped at 1 MB.
+- Request bodies to *our* endpoints are capped at 1 MB, answered with `413` and a
+  connection close — the unread remainder would otherwise be parsed as the start
+  of the next request on that socket.
 - Schema inference samples at most 250 array elements and 24 levels of nesting,
   so a hostile payload cannot exhaust CPU or stack.
 - Notification channel URLs are validated as https at creation. They are *not*

@@ -40,8 +40,14 @@ export function htmlReply(body: Raw | string, status = 200): Reply {
     headers: {
       'content-type': 'text/html; charset=utf-8',
       // The UI ships no third-party scripts, so lock the page down hard.
+      // `form-action` must name the Stripe hosts. Chrome and Safari apply this
+      // directive to the *redirect target* of a form submission, not just the
+      // immediate action, so a bare 'self' silently blocks the hop from
+      // POST /billing/checkout to Stripe Checkout — meaning nobody can pay.
       'content-security-policy':
-        "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "default-src 'none'; style-src 'unsafe-inline'; img-src data:; " +
+        "form-action 'self' https://checkout.stripe.com https://billing.stripe.com; " +
+        "base-uri 'none'; frame-ancestors 'none'",
       'referrer-policy': 'same-origin',
       'x-content-type-options': 'nosniff',
       'x-frame-options': 'DENY',
@@ -152,13 +158,18 @@ export function parseCookies(header: string | undefined): Record<string, string>
   return jar;
 }
 
+/** Thrown when a request body exceeds the cap, so the server can answer 413. */
+export class PayloadTooLargeError extends Error {}
+
 async function readBody(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   let total = 0;
   for await (const chunk of req) {
     const buffer = chunk as Buffer;
     total += buffer.byteLength;
-    if (total > MAX_BODY_BYTES) throw new Error('request body too large');
+    if (total > MAX_BODY_BYTES) {
+      throw new PayloadTooLargeError(`request body exceeded ${MAX_BODY_BYTES} bytes`);
+    }
     chunks.push(buffer);
   }
   return Buffer.concat(chunks).toString('utf8');
@@ -168,6 +179,7 @@ export function buildContext(
   req: IncomingMessage,
   baseUrl: string,
   params: Record<string, string>,
+  trustProxy = true,
 ): RequestContext {
   const url = new URL(req.url ?? '/', baseUrl);
   let cached: Promise<string> | null = null;
@@ -184,7 +196,9 @@ export function buildContext(
     headers: req.headers,
     cookies: parseCookies(req.headers.cookie),
     ip:
-      (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ??
+      (trustProxy
+        ? (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim()
+        : undefined) ??
       req.socket.remoteAddress ??
       'unknown',
     text,

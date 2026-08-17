@@ -93,6 +93,8 @@ export type StripeSubscription = {
   items: {
     data: { price: { id: string }; current_period_end?: number }[];
   };
+  /** We stamp `driftwatch_user_id` here at checkout; used to attribute events. */
+  metadata?: Record<string, string>;
 };
 
 export async function createCustomer(

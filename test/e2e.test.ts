@@ -8,10 +8,12 @@ import { openDatabase } from '../src/db.ts';
 import { createApp } from '../src/http/server.ts';
 import { createScheduler } from '../src/monitor/scheduler.ts';
 import {
+  countIncidentsSince,
   createApiKey,
   createChannel,
   createLoginToken,
   findSession,
+  findUserById,
   listChannels,
   listIncidentsForUser,
   listMonitors,
@@ -98,6 +100,7 @@ test('end to end: sign in, monitor, detect a break, deliver a signed alert', asy
       prices: { pro: 'price_pro', team: 'price_team' },
       enabled: false,
     },
+    trustProxy: false,
     scheduler: { enabled: false, tickMs: 1000, concurrency: 4 },
     // The test targets 127.0.0.1, which the SSRF guard blocks by default.
     probe: { maxBytes: 1_000_000, timeoutMs: 5000, allowPrivateTargets: true },
@@ -149,6 +152,31 @@ test('end to end: sign in, monitor, detect a break, deliver a signed alert', asy
 
   await t.test('an unknown page renders a 404 rather than crashing', async () => {
     assert.equal((await request('/nope')).status, 404);
+  });
+
+  await t.test('the CSP allows forms to reach Stripe', async () => {
+    // Chrome and Safari apply form-action to the redirect target of a form
+    // submission, so a bare 'self' would silently block the hop to Stripe
+    // Checkout and no customer could ever pay.
+    const csp = (await request('/')).headers.get('content-security-policy') ?? '';
+    assert.match(csp, /form-action [^;]*https:\/\/checkout\.stripe\.com/);
+    assert.match(csp, /form-action [^;]*https:\/\/billing\.stripe\.com/);
+    assert.match(csp, /default-src 'none'/);
+  });
+
+  await t.test('an oversized request body gets a 413, not a 500', async () => {
+    const response = await request('/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: `email=${'x'.repeat(1_200_000)}@example.com`,
+    });
+    assert.equal(response.status, 413);
+  });
+
+  await t.test('the public status page does not publish instance-wide counters', async () => {
+    const body = await (await request('/status')).text();
+    assert.ok(!body.includes('Active monitors'), 'anonymous visitors must not see totals');
+    assert.match(body, /All systems operational/);
   });
 
   // -------------------------------------------------------------------- auth -
@@ -280,6 +308,41 @@ test('end to end: sign in, monitor, detect a break, deliver a signed alert', asy
     assert.equal(monitor.baseline_content_type, 'application/json');
     assert.equal(monitor.total_checks, 1);
     assert.equal(received.length, 0, 'no alert for a first observation');
+  });
+
+  await t.test('a manual check refreshes the last-run time', async () => {
+    // "Check now" used to leave last_run_at stale, so the dashboard reported a
+    // check that had just happened as hours old.
+    db.prepare('update monitors set last_run_at = 0 where id = ?').run(monitorId);
+    await scheduler.runMonitorNow(monitorId);
+    const monitor = listMonitors(db, userId).find((row) => row.id === monitorId)!;
+    assert.ok(monitor.last_run_at !== null && monitor.last_run_at > 0);
+  });
+
+  await t.test('repeated identical checks do not each store a schema copy', async () => {
+    // Storing the full schema on every check costs roughly a gigabyte per Pro
+    // customer over a 90 day window and adds no information.
+    const countStored = () =>
+      (
+        db
+          .prepare(
+            'select count(*) as n from snapshots where monitor_id = ? and schema_json is not null',
+          )
+          .get(monitorId) as { n: number }
+      ).n;
+
+    const before = countStored();
+    await scheduler.runMonitorNow(monitorId);
+    await scheduler.runMonitorNow(monitorId);
+    await scheduler.runMonitorNow(monitorId);
+    assert.equal(countStored(), before, 'an unchanged shape should not be re-stored');
+
+    const total = (
+      db.prepare('select count(*) as n from snapshots where monitor_id = ?').get(monitorId) as {
+        n: number;
+      }
+    ).n;
+    assert.ok(total > before, 'the checks themselves are still recorded');
   });
 
   await t.test('an ignored field changing is adopted silently', async () => {
@@ -504,6 +567,70 @@ test('end to end: sign in, monitor, detect a break, deliver a signed alert', asy
       ((await response.json()) as { error: { type: string } }).error.type,
       'invalid_signature',
     );
+  });
+
+  await t.test('the dashboard counts every incident, not just the first page', async () => {
+    // The tiles used to be computed from a capped page of rows, so a busy
+    // account saw its own numbers understated.
+    const monitor = listMonitors(db, userId)[0]!;
+    for (let i = 0; i < 60; i++) {
+      db.prepare(
+        `insert into incidents(id, monitor_id, user_id, created_at, kind, severity, summary, changes_json)
+         values (?, ?, ?, ?, 'schema', 'breaking', 'bulk', '[]')`,
+      ).run(`inc_bulk_${i}`, monitor.id, userId, Date.now());
+    }
+    const counts = countIncidentsSince(db, userId, Date.now() - 30 * 86_400_000);
+    assert.ok(counts.total > 50, `expected more than one page, got ${counts.total}`);
+
+    const body = await (await request('/dashboard', { cookie })).text();
+    assert.match(body, new RegExp(`>${counts.total}<`), 'the tile must show the real total');
+
+    db.prepare("delete from incidents where id like 'inc_bulk_%'").run();
+  });
+
+  await t.test('account deletion refuses to strand a live subscription', async () => {
+    // The user was switched to an active Pro plan earlier in this run.
+    const response = await request('/settings/delete', {
+      method: 'POST',
+      cookie,
+      body: new URLSearchParams({ csrf, confirm: 'DELETE' }),
+    });
+    assert.equal(response.headers.get('location'), '/settings?status=cancel-first');
+    assert.ok(findUserById(db, userId), 'the account must survive');
+  });
+
+  await t.test('account deletion requires typing the confirmation', async () => {
+    setUserBilling(db, userId, { plan: 'free', subscriptionStatus: 'canceled' });
+    const response = await request('/settings/delete', {
+      method: 'POST',
+      cookie,
+      body: new URLSearchParams({ csrf, confirm: 'yes please' }),
+    });
+    assert.equal(response.headers.get('location'), '/settings?status=confirm-delete');
+    assert.ok(findUserById(db, userId));
+  });
+
+  await t.test('deleting the account erases everything it owned', async () => {
+    assert.ok(listMonitors(db, userId).length > 0, 'precondition: data exists');
+
+    const response = await request('/settings/delete', {
+      method: 'POST',
+      cookie,
+      body: new URLSearchParams({ csrf, confirm: 'delete' }),
+    });
+    assert.equal(response.headers.get('location'), '/?status=account-deleted');
+
+    assert.equal(findUserById(db, userId), null);
+    assert.equal(listMonitors(db, userId).length, 0, 'monitors must cascade');
+    assert.equal(listIncidentsForUser(db, userId).length, 0, 'incidents must cascade');
+    assert.equal(listChannels(db, userId).length, 0, 'channels must cascade');
+    for (const table of ['snapshots', 'deliveries', 'api_keys', 'sessions']) {
+      const row = db.prepare(`select count(*) as n from ${table}`).get() as { n: number };
+      assert.equal(row.n, 0, `${table} must be empty after the cascade`);
+    }
+
+    // The session went with it.
+    assert.equal((await request('/dashboard', { cookie })).status, 303);
   });
 
   await t.test('signing out clears the session', async () => {

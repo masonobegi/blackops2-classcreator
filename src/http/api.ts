@@ -4,8 +4,10 @@ import { canAddMonitor } from '../billing/entitlements.ts';
 import { handleStripeEvent, type StripeEvent } from '../billing/webhook.ts';
 import { verifyWebhookSignature } from '../billing/stripe.ts';
 import { parseJson } from '../lib/util.ts';
+import { createRateLimiter } from '../lib/ratelimit.ts';
 import { effectivePlan } from '../plans.ts';
 import type { Change } from '../schema/diff.ts';
+import { schemaHash, type SchemaNode } from '../schema/infer.ts';
 import {
   createMonitor,
   deleteMonitor,
@@ -25,7 +27,21 @@ function apiError(status: number, type: string, message: string): Reply {
   return jsonReply({ error: { type, message } }, status);
 }
 
+/**
+ * Per-account API budget. Generous enough that no honest integration notices,
+ * tight enough that a runaway script in a customer's CI cannot saturate the
+ * single process that also serves the scheduler and everyone else's dashboard.
+ */
+const apiLimiter = createRateLimiter({ limit: 300, windowMs: 60_000 });
+
 function serializeMonitor(monitor: MonitorRow): unknown {
+  // Report the *shape* hash, matching the `from_schema`/`to_schema` values on
+  // incidents. `monitor.baseline_hash` is a wider internal fingerprint that also
+  // covers status code and content type, so exposing it here would give API
+  // consumers two hashes that look comparable but never match.
+  const baselineSchema = parseJson<SchemaNode | null>(monitor.baseline_schema_json, null);
+
+
   return {
     id: monitor.id,
     name: monitor.name,
@@ -39,7 +55,7 @@ function serializeMonitor(monitor: MonitorRow): unknown {
     created_at: new Date(monitor.created_at).toISOString(),
     last_run_at: monitor.last_run_at === null ? null : new Date(monitor.last_run_at).toISOString(),
     baseline: {
-      schema_hash: monitor.baseline_hash,
+      schema_hash: baselineSchema === null ? null : schemaHash(baselineSchema),
       status_code: monitor.baseline_status,
       content_type: monitor.baseline_content_type,
       learned_at: monitor.baseline_at === null ? null : new Date(monitor.baseline_at).toISOString(),
@@ -69,6 +85,19 @@ export function registerApiRoutes(router: Router, deps: ApiDeps): void {
       if (!effectivePlan(user.plan, user.subscription_status).apiAccess) {
         return apiError(403, 'plan_required', 'The REST API requires the Pro or Team plan.');
       }
+
+      const budget = apiLimiter.check(user.id);
+      if (!budget.allowed) {
+        return {
+          ...apiError(429, 'rate_limited', 'Too many requests. Slow down and retry.'),
+          headers: {
+            'content-type': 'application/json; charset=utf-8',
+            'x-content-type-options': 'nosniff',
+            'retry-after': String(budget.retryAfterSeconds),
+          },
+        };
+      }
+
       return handler(user, ctx);
     };
 

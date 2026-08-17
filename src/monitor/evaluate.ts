@@ -1,4 +1,5 @@
-import { inferSchema, schemaHash, type SchemaNode } from '../schema/infer.ts';
+import { canonicalize, inferSchema, schemaHash, type SchemaNode } from '../schema/infer.ts';
+import { fingerprint } from '../lib/crypto.ts';
 import {
   diffResponseMeta,
   diffSchemas,
@@ -77,13 +78,7 @@ export function emptyState(): EvalState {
  * "403 JSON" matters just as much as a renamed field.
  */
 function contractHash(schema: SchemaNode, status: number, contentType: string): string {
-  return schemaHash({
-    t: 'object',
-    props: {
-      [`__status_${status}`]: { schema, optional: false },
-      [`__ct_${contentType}`]: { schema: { t: 'null' }, optional: false },
-    },
-  });
+  return fingerprint(`${status}|${contentType}|${canonicalize(schema)}`);
 }
 
 /**

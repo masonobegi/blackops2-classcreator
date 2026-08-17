@@ -50,9 +50,10 @@ export function dashboardPage(
   plan: Plan,
   monitors: MonitorRow[],
   incidents: IncidentRow[],
+  /** Aggregated in SQL, so the tiles stay correct past one page of incidents. */
+  counts: { total: number; breaking: number },
   status: string | null,
 ): Raw {
-  const breakingCount = incidents.filter((i) => i.severity === 'breaking').length;
   const watching = monitors.filter((m) => m.status === 'active').length;
 
   return page(
@@ -78,9 +79,9 @@ export function dashboardPage(
         <div class="stat"><div class="k">Watching</div><div class="v">${watching}</div></div>
         <div class="stat"><div class="k">Checks run</div>
           <div class="v">${monitors.reduce((sum, m) => sum + m.total_checks, 0)}</div></div>
-        <div class="stat"><div class="k">Incidents (30d)</div><div class="v">${incidents.length}</div></div>
+        <div class="stat"><div class="k">Incidents (30d)</div><div class="v">${counts.total}</div></div>
         <div class="stat"><div class="k">Breaking (30d)</div>
-          <div class="v" style="${breakingCount > 0 ? 'color:var(--breaking)' : ''}">${breakingCount}</div></div>
+          <div class="v" style="${counts.breaking > 0 ? 'color:var(--breaking)' : ''}">${counts.breaking}</div></div>
       </div>
 
       ${monitors.length === 0
@@ -157,6 +158,19 @@ export function monitorFormPage(
   const ignorePaths = parseJson<string[]>(monitor?.ignore_paths_json, []).join('\n');
   const action = isNew ? '/monitors' : `/monitors/${monitor.id}`;
 
+  // The API accepts any interval at or above the plan minimum, so a monitor can
+  // legitimately hold a value this list does not offer. Without adding it, the
+  // select would fall back to its first option and saving the form would
+  // silently retune the monitor the customer only meant to rename.
+  const intervalChoices = INTERVAL_CHOICES.filter(
+    ([seconds]) => seconds >= plan.minIntervalSeconds,
+  );
+  const current = monitor?.interval_seconds;
+  if (current !== undefined && !intervalChoices.some(([seconds]) => seconds === current)) {
+    intervalChoices.push([current, `Every ${formatInterval(current)}`]);
+    intervalChoices.sort((a, b) => a[0] - b[0]);
+  }
+
   return page(
     { title: `${isNew ? 'New' : 'Edit'} monitor — Driftwatch`, user, active: 'dashboard', narrow: true },
     html`
@@ -181,7 +195,7 @@ export function monitorFormPage(
           <div class="field">
             <label for="method">Method</label>
             <select id="method" name="method">
-              ${['GET', 'POST', 'PUT', 'HEAD'].map(
+              ${['GET', 'POST', 'PUT'].map(
                 (verb) => html`
                   <option value="${verb}" ${monitor?.method === verb ? 'selected' : ''}>${verb}</option>
                 `,
@@ -191,7 +205,7 @@ export function monitorFormPage(
           <div class="field">
             <label for="interval_seconds">Check interval</label>
             <select id="interval_seconds" name="interval_seconds">
-              ${INTERVAL_CHOICES.filter(([seconds]) => seconds >= plan.minIntervalSeconds).map(
+              ${intervalChoices.map(
                 ([seconds, label]) => html`
                   <option value="${seconds}" ${monitor?.interval_seconds === seconds ? 'selected' : ''}>
                     ${label}
@@ -681,6 +695,24 @@ export function settingsPage(
         <form method="post" action="/logout">
           ${csrfField(csrf)}
           <button class="btn secondary" type="submit">Sign out</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3>Delete account</h3>
+        <p>
+          Permanently erases your monitors, schema history, incidents, channels and
+          API keys. This cannot be undone.
+          ${plan.id !== 'free'
+            ? html`<strong>Cancel your subscription in the billing portal first</strong>,
+                   so you are not charged again.`
+            : ''}
+        </p>
+        <form method="post" action="/settings/delete" class="actions">
+          ${csrfField(csrf)}
+          <input name="confirm" type="text" placeholder="Type DELETE to confirm"
+                 style="max-width:240px" aria-label="Type DELETE to confirm">
+          <button class="btn danger" type="submit">Delete my account</button>
         </form>
       </div>
     `,

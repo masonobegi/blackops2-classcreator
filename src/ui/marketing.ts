@@ -30,7 +30,9 @@ export function landingPage(status: string | null): Raw {
           <a class="btn" href="/login">Start monitoring free</a>
           <a class="btn secondary" href="#how">How it works</a>
         </div>
-        <p style="font-size:13px">Two monitors free forever. No card, no sales call.</p>
+        <p style="font-size:13px">
+          ${PLANS.free.monitors} monitors free forever. No card, no sales call.
+        </p>
       </section>
 
       <section style="margin-top:44px">
@@ -324,12 +326,27 @@ curl -X DELETE -H "Authorization: Bearer $DW_KEY" ${baseUrl}/api/v1/monitors/mon
 
       <h2>Limits and behaviour</h2>
       <ul class="ticks">
+        <li><code>GET</code>, <code>POST</code> and <code>PUT</code> are supported.
+            <code>HEAD</code> is not: it returns no body, so there is no shape to compare.</li>
         <li>Responses are read up to 2 MB; larger ones are recorded as a failed check.</li>
+        <li>A <code>5xx</code>, a timeout or a non-JSON body is a failed check and never
+            replaces your baseline. Three consecutive failures raise one alert.</li>
+        <li>A <code>4xx</code> with a JSON body <em>is</em> compared — an endpoint that
+            starts returning <code>403</code> has changed its contract.</li>
         <li>Up to 3 redirects are followed, and every hop is re-validated.</li>
         <li>Only public http(s) endpoints on ports 80, 443, 8080 and 8443 can be monitored.</li>
         <li>Arrays are sampled to their first 250 elements when inferring element shape.</li>
         <li>Integers and floats are both <code>number</code>; enum values are not tracked.</li>
+        <li>The REST API allows 300 requests per minute per account, and answers
+            <code>429</code> with a <code>Retry-After</code> header beyond that.</li>
       </ul>
+
+      <h2>Deleting your data</h2>
+      <p>
+        <a href="/settings">Settings</a> has a delete button that erases your account,
+        monitors, schema history, incidents, channels and API keys immediately. Cancel
+        your subscription in the billing portal first so you are not charged again.
+      </p>
     `,
   );
 }

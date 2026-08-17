@@ -7,10 +7,11 @@ import { parseJson } from '../lib/util.ts';
 import { createRateLimiter } from '../lib/ratelimit.ts';
 import { sendLoginEmail } from '../notify/dispatch.ts';
 import type { Scheduler } from '../monitor/scheduler.ts';
-import { effectivePlan } from '../plans.ts';
+import { effectivePlan, isEntitled } from '../plans.ts';
 import {
   acknowledgeIncident,
   consumeLoginToken,
+  countIncidentsSince,
   createApiKey,
   createChannel,
   createLoginToken,
@@ -20,6 +21,7 @@ import {
   deleteChannel,
   deleteMonitor,
   deleteSession,
+  deleteUser,
   getIncident,
   getUserMonitor,
   listApiKeys,
@@ -73,8 +75,12 @@ export type WebDeps = {
   scheduler: Scheduler;
 };
 
-// Login emails cost money and land in someone's inbox, so they get a tight cap.
-const loginLimiter = createRateLimiter({ limit: 5, windowMs: 15 * 60_000 });
+// Login emails cost money and land in someone else's inbox, so they get two
+// independent caps. The IP-keyed one stops broad scraping; the address-keyed one
+// is the important half, because a client-supplied X-Forwarded-For can rotate
+// the IP key at will but cannot change whose mailbox is being flooded.
+const loginIpLimiter = createRateLimiter({ limit: 5, windowMs: 15 * 60_000 });
+const loginEmailLimiter = createRateLimiter({ limit: 5, windowMs: 60 * 60_000 });
 const writeLimiter = createRateLimiter({ limit: 60, windowMs: 60_000 });
 
 export function registerWebRoutes(router: Router, deps: WebDeps): void {
@@ -153,29 +159,43 @@ export function registerWebRoutes(router: Router, deps: WebDeps): void {
 
   router.get('/status', (ctx) => {
     const auth = currentAuth(db, ctx);
-    const row = db
-      .prepare(
-        `select
-           (select count(*) from monitors where status = 'active') as active,
-           (select count(*) from snapshots where created_at > ?) as checks_1h,
-           (select count(*) from deliveries where status = 'pending') as queued`,
-      )
-      .get(Date.now() - 3_600_000) as { active: number; checks_1h: number; queued: number };
+
+    // Instance-wide totals are shown only to signed-in users. On a public page
+    // "Active monitors: 3" tells every prospect exactly how few customers you
+    // have, which is a sales problem long before it is a privacy one.
+    const counters = auth
+      ? (db
+          .prepare(
+            `select
+               (select count(*) from monitors where status = 'active') as active,
+               (select count(*) from snapshots where created_at > ?) as checks_1h,
+               (select count(*) from deliveries where status = 'pending') as queued`,
+          )
+          .get(Date.now() - 3_600_000) as { active: number; checks_1h: number; queued: number })
+      : null;
 
     return htmlReply(
       page(
         { title: 'Status — Driftwatch', user: auth?.user ?? null, narrow: true },
         html`
           <h1>Status</h1>
-          <p class="sub">Live counters from this instance.</p>
-          <div class="grid c3">
-            <div class="stat"><div class="k">Active monitors</div><div class="v">${row.active}</div></div>
-            <div class="stat"><div class="k">Checks last hour</div><div class="v">${row.checks_1h}</div></div>
-            <div class="stat"><div class="k">Alerts queued</div><div class="v">${row.queued}</div></div>
-          </div>
-          <p style="margin-top:24px">
-            Scheduler is ${config.scheduler.enabled ? 'running' : 'disabled'} on this node.
+          <p class="sub">
+            All systems operational. Checks are running${config.scheduler.enabled
+              ? ''
+              : ' — scheduler disabled on this node'}.
           </p>
+          ${counters
+            ? html`
+                <div class="grid c3">
+                  <div class="stat"><div class="k">Active monitors</div><div class="v">${counters.active}</div></div>
+                  <div class="stat"><div class="k">Checks last hour</div><div class="v">${counters.checks_1h}</div></div>
+                  <div class="stat"><div class="k">Alerts queued</div><div class="v">${counters.queued}</div></div>
+                </div>
+                <p style="margin-top:24px;font-size:13px">
+                  Counters cover this whole instance and are visible to signed-in users only.
+                </p>
+              `
+            : html`<p><a href="/login">Sign in</a> to see live counters for your monitors.</p>`}
         `,
       ),
     );
@@ -199,14 +219,16 @@ export function registerWebRoutes(router: Router, deps: WebDeps): void {
       return htmlReply(loginPage(false, email, null, 'That email address does not look right.'), 400);
     }
 
-    const limit = loginLimiter.check(`${ctx.ip}:${email}`);
-    if (!limit.allowed) {
+    const byIp = loginIpLimiter.check(ctx.ip);
+    const byEmail = loginEmailLimiter.check(email);
+    if (!byIp.allowed || !byEmail.allowed) {
+      const wait = Math.max(byIp.retryAfterSeconds, byEmail.retryAfterSeconds);
       return htmlReply(
         loginPage(
           false,
           email,
           null,
-          `Too many sign-in attempts. Try again in ${Math.ceil(limit.retryAfterSeconds / 60)} minutes.`,
+          `Too many sign-in attempts. Try again in ${Math.ceil(wait / 60)} minutes.`,
         ),
         429,
       );
@@ -249,11 +271,15 @@ export function registerWebRoutes(router: Router, deps: WebDeps): void {
   router.get(
     '/dashboard',
     authed((ctx, auth) => {
+      const since = Date.now() - 30 * 86_400_000;
       const monitors = listMonitors(db, auth.user.id);
       const incidents = listIncidentsForUser(db, auth.user.id, 50).filter(
-        (incident) => incident.created_at > Date.now() - 30 * 86_400_000,
+        (incident) => incident.created_at > since,
       );
-      return htmlReply(dashboardPage(auth.user, planFor(auth), monitors, incidents, flashOf(ctx)));
+      const counts = countIncidentsSince(db, auth.user.id, since);
+      return htmlReply(
+        dashboardPage(auth.user, planFor(auth), monitors, incidents, counts, flashOf(ctx)),
+      );
     }),
   );
 
@@ -347,8 +373,16 @@ export function registerWebRoutes(router: Router, deps: WebDeps): void {
 
       updateMonitorSettings(db, auth.user.id, id, validation.value);
 
-      // Changing the request means the old baseline describes a different thing.
-      if (validation.value.url !== monitor.url || validation.value.method !== monitor.method) {
+      // Changing what we ask for means the old baseline describes a different
+      // thing, and diffing against it would manufacture a breaking change out
+      // of the customer's own edit. Body counts: a different GraphQL query or
+      // search payload returns a different shape. Headers do not — rotating an
+      // auth token is not a new contract.
+      if (
+        validation.value.url !== monitor.url ||
+        validation.value.method !== monitor.method ||
+        validation.value.body !== monitor.body
+      ) {
         resetBaseline(db, auth.user.id, id);
       }
       return redirect(`/monitors/${id}?status=updated`);
@@ -528,6 +562,25 @@ export function registerWebRoutes(router: Router, deps: WebDeps): void {
     authedPost((ctx, auth) => {
       deleteApiKey(db, auth.user.id, ctx.params.id ?? '');
       return redirect('/settings?status=key-deleted');
+    }),
+  );
+
+  router.post(
+    '/settings/delete',
+    authedPost((_ctx, auth, form) => {
+      if ((form.get('confirm') ?? '').trim().toUpperCase() !== 'DELETE') {
+        return redirect('/settings?status=confirm-delete');
+      }
+      // Refuse while money is still moving. Erasing the account would orphan a
+      // live Stripe subscription that keeps charging a customer we can no longer
+      // identify or serve.
+      if (isEntitled(auth.user.subscription_status) && auth.user.plan !== 'free') {
+        return redirect('/settings?status=cancel-first');
+      }
+
+      deleteUser(db, auth.user.id);
+      console.log(`[account] deleted ${auth.user.id}`);
+      return withCookie(redirect('/?status=account-deleted'), clearSessionCookie(config));
     }),
   );
 

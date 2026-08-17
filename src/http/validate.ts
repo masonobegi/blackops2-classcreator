@@ -20,7 +20,12 @@ export type ValidationResult =
   | { ok: true; value: MonitorInput }
   | { ok: false; errors: string[] };
 
-const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'HEAD']);
+/**
+ * HEAD is deliberately absent: it returns no body, so there is no response
+ * shape to learn and every check would fail as "not JSON". Offering it would be
+ * offering a monitor that can only ever alert about itself.
+ */
+const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT']);
 const SEVERITIES = new Set(['breaking', 'warning', 'info']);
 
 /** Parse a `Name: value` block into a header map, dropping malformed lines. */

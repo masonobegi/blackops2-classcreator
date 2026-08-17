@@ -216,6 +216,12 @@ export function flash(status: string | null): Raw | '' {
     'invalid-input': ['err', 'Some of those values were not valid. Nothing was saved.'],
     'billing-unavailable': ['err', 'Billing is not configured on this instance.'],
     expired: ['err', 'That sign-in link has expired or was already used.'],
+    'account-deleted': ['ok', 'Your account and all its data have been deleted.'],
+    'confirm-delete': ['err', 'Type DELETE in the box to confirm. Nothing was deleted.'],
+    'cancel-first': [
+      'err',
+      'Cancel your subscription in the billing portal before deleting your account, so you are not charged again.',
+    ],
   };
   const entry = messages[status];
   return entry ? notice(entry[0], entry[1]) : '';

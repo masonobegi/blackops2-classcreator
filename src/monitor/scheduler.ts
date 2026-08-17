@@ -6,7 +6,7 @@ import { mapLimit, parseJson } from '../lib/util.ts';
 import { queueIncidentNotifications, runDeliveryQueue } from '../notify/dispatch.ts';
 import { effectivePlan } from '../plans.ts';
 import type { Severity } from '../schema/diff.ts';
-import type { SchemaNode } from '../schema/infer.ts';
+import { schemaHash, type SchemaNode } from '../schema/infer.ts';
 import {
   claimDueMonitors,
   findUserById,
@@ -63,8 +63,26 @@ export function createScheduler(db: Database, config: Config): Scheduler {
   let timer: NodeJS.Timeout | null = null;
   let running = false;
 
-  /** Probe one monitor and persist everything that follows from the result. */
+  /**
+   * Monitors currently being probed. A scheduled claim and a "Check now" click
+   * can otherwise land on the same monitor at the same moment, and two probes
+   * evaluating against the same stale baseline would both confirm the change and
+   * raise duplicate incidents.
+   */
+  const inFlight = new Set<string>();
+
   async function checkMonitor(monitor: MonitorRow): Promise<boolean> {
+    if (inFlight.has(monitor.id)) return false;
+    inFlight.add(monitor.id);
+    try {
+      return await performCheck(monitor);
+    } finally {
+      inFlight.delete(monitor.id);
+    }
+  }
+
+  /** Probe one monitor and persist everything that follows from the result. */
+  async function performCheck(monitor: MonitorRow): Promise<boolean> {
     const previous = stateFromRow(monitor);
 
     const outcome = await probe(
@@ -88,6 +106,15 @@ export function createScheduler(db: Database, config: Config): Scheduler {
       now: Date.now(),
     });
 
+    // Store the full schema only when this observation differs in shape from
+    // what we already had. In steady state a monitor sees the same shape
+    // forever, and keeping a copy per check costs about a gigabyte per Pro
+    // customer over a 90 day retention window for no added information. Every
+    // *distinct* shape is still captured, at least on the check that first saw
+    // it and again on the check that confirmed it.
+    const previousShapeHash = previous.baselineSchema ? schemaHash(previous.baselineSchema) : null;
+    const shapeIsNew = result.schemaHash !== null && result.schemaHash !== previousShapeHash;
+
     insertSnapshot(db, {
       monitorId: monitor.id,
       ok: outcome.ok,
@@ -95,7 +122,7 @@ export function createScheduler(db: Database, config: Config): Scheduler {
       contentType: outcome.contentType,
       latencyMs: outcome.latencyMs,
       schemaHash: result.schemaHash,
-      schemaJson: result.schemaJson,
+      schemaJson: shapeIsNew ? result.schemaJson : null,
       error: outcome.ok ? null : outcome.error,
     });
 

@@ -21,6 +21,12 @@ export type Config = {
     prices: { pro: string; team: string };
     enabled: boolean;
   };
+  /**
+   * Whether to believe `X-Forwarded-For`. True is right behind Fly, Railway,
+   * Render or any reverse proxy; false when the process is directly exposed,
+   * where a client could otherwise spoof the header to reset its rate limits.
+   */
+  trustProxy: boolean;
   scheduler: {
     enabled: boolean;
     tickMs: number;
@@ -75,6 +81,7 @@ export function loadConfig(): Config {
       prices: { pro: env('STRIPE_PRICE_PRO'), team: env('STRIPE_PRICE_TEAM') },
       enabled: stripeSecret !== '',
     },
+    trustProxy: envBool('TRUST_PROXY', true),
     scheduler: {
       enabled: envBool('SCHEDULER_ENABLED', true),
       tickMs: envInt('SCHEDULER_TICK_MS', 10_000),

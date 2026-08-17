@@ -511,7 +511,10 @@ export function persistMonitorState(db: Database, id: string, state: MonitorPers
        pending_hash = ?, pending_schema_json = ?, pending_status = ?,
        pending_content_type = ?, pending_count = ?,
        consecutive_failures = ?, failure_alerted = ?, last_ok_at = ?,
-       total_checks = total_checks + 1
+       total_checks = total_checks + 1,
+       -- Set here rather than only at claim time so a manual "Check now" also
+       -- refreshes it. This is the last *completed* check.
+       last_run_at = ?
      where id = ?`,
   ).run(
     state.baselineHash,
@@ -527,6 +530,7 @@ export function persistMonitorState(db: Database, id: string, state: MonitorPers
     state.consecutiveFailures,
     state.failureAlerted,
     state.lastOkAt,
+    Date.now(),
     id,
   );
 }
@@ -631,6 +635,26 @@ export function listIncidentsForUser(db: Database, userId: string, limit = 50): 
     .all(userId, limit) as IncidentRow[];
 }
 
+/**
+ * Aggregate counts for the dashboard. Counting a capped page of rows in JS
+ * instead would silently understate any account busy enough to exceed the page
+ * size — the exact accounts whose numbers matter most.
+ */
+export function countIncidentsSince(
+  db: Database,
+  userId: string,
+  since: number,
+): { total: number; breaking: number } {
+  const row = db
+    .prepare(
+      `select count(*) as total,
+              sum(case when severity = 'breaking' then 1 else 0 end) as breaking
+         from incidents where user_id = ? and created_at > ?`,
+    )
+    .get(userId, since) as { total: number; breaking: number | null };
+  return { total: row.total, breaking: row.breaking ?? 0 };
+}
+
 export function listIncidentsForMonitor(db: Database, monitorId: string, limit = 50): IncidentRow[] {
   return db
     .prepare('select * from incidents where monitor_id = ? order by created_at desc limit ?')
@@ -716,7 +740,14 @@ export function getDeliveryContext(
 
 // -------------------------------------------------------- stripe events ------
 
-/** Returns false when the event was already handled (Stripe retries a lot). */
+/**
+ * Returns false when the event was already handled (Stripe retries a lot).
+ *
+ * Only a primary-key collision counts as "already handled". Treating *any*
+ * failure as a duplicate would silently discard billing events whenever the
+ * database was momentarily busy, which is how a paying customer ends up stuck
+ * on the free plan with no trace of why.
+ */
 export function claimStripeEvent(db: Database, id: string, type: string): boolean {
   try {
     db.prepare('insert into stripe_events(id, type, received_at) values (?, ?, ?)').run(
@@ -725,12 +756,26 @@ export function claimStripeEvent(db: Database, id: string, type: string): boolea
       Date.now(),
     );
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/UNIQUE constraint failed|PRIMARY KEY/i.test(message)) return false;
+    throw error;
   }
 }
 
 // ------------------------------------------------------------ janitorial -----
+
+/**
+ * Erase an account and everything belonging to it.
+ *
+ * Every table referencing `users` does so with `on delete cascade`, and foreign
+ * keys are enabled on the connection, so this single delete removes monitors,
+ * snapshots, incidents, deliveries, channels, API keys, sessions and login
+ * tokens. Anyone taking money needs a real erasure path, not a support ticket.
+ */
+export function deleteUser(db: Database, userId: string): void {
+  db.prepare('delete from users where id = ?').run(userId);
+}
 
 export function pruneExpired(db: Database): void {
   const now = Date.now();

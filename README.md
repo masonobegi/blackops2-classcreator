@@ -79,6 +79,10 @@ product that cries wolf gets muted and then cancelled, so:
 - **Nullability is reported once.** `string` → `null` is one breaking change, not
   a nullability change plus a type change; and `null` → `string` is *not*
   breaking, because any consumer was already handling null.
+- **A `4xx` with a JSON body is compared, not discarded.** An endpoint that
+  starts answering `403` has changed its contract.
+- **Editing a monitor's URL, method or body re-baselines it**, so your own edit
+  cannot masquerade as the vendor breaking something.
 
 ### Severity, from the consumer's point of view
 
@@ -109,7 +113,7 @@ To watch something on your own machine, set `PROBE_ALLOW_PRIVATE_TARGETS=1`.
 ability to probe your internal network.
 
 ```bash
-npm test             # 118 tests, no network required
+npm test             # 182 tests, no network required
 npm run typecheck
 ```
 
@@ -195,6 +199,7 @@ matter:
 | `DATABASE_PATH` | Put this on a persistent volume. |
 | `EMAIL_PROVIDER` | `resend` · `postmark` · `none` (prints to stdout). |
 | `STRIPE_*` | Omit to run everyone on the Free plan. |
+| `TRUST_PROXY` | Default `1`. Set `0` if the process is directly exposed, so a spoofed `X-Forwarded-For` cannot reset rate limits. |
 | `PROBE_ALLOW_PRIVATE_TARGETS` | Dangerous. See [SECURITY.md](SECURITY.md). |
 
 ---
@@ -229,7 +234,7 @@ src/
   http/
     router.ts, server.ts, web.ts, api.ts, session.ts, validate.ts
   ui/                   server-rendered HTML, no client JavaScript
-test/                   118 tests: unit, security, billing, full end-to-end
+test/                   182 tests: unit, security, billing, full end-to-end
 ```
 
 `src/monitor/evaluate.ts` is the file to read first, and the one to be careful
