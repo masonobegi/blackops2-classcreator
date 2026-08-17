@@ -1,12 +1,20 @@
 {
-  "name": "jack-meme",
+  "name": "driftwatch",
   "version": "1.0.0",
-  "description": "jack meme with looping fart noise",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
+  "private": true,
+  "description": "Automated breaking-change monitoring for the third-party APIs you depend on.",
+  "type": "module",
   "engines": {
-    "node": ">=18"
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/index.ts",
+    "dev": "DRIFTWATCH_DEV_LOGIN=1 node --disable-warning=ExperimentalWarning --watch src/index.ts",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
   }
 }

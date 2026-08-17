@@ -1,0 +1,13 @@
+node_modules
+test
+data
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.local
+.git
+.github
+*.md
+!README.md
+tsconfig.json

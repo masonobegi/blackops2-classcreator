@@ -1,0 +1,44 @@
+# Fly.io deployment. Rename the app before deploying.
+#
+#   fly launch --no-deploy
+#   fly volumes create data --size 3
+#   fly secrets set SESSION_SECRET=$(openssl rand -hex 32) BASE_URL=https://your-domain.com
+#   fly deploy
+app = "driftwatch"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  NODE_ENV = "production"
+  DATABASE_PATH = "/data/driftwatch.db"
+  SCHEDULER_ENABLED = "1"
+  SCHEDULER_CONCURRENCY = "8"
+
+# SQLite lives on a real disk, so the machine is a pet, not cattle.
+[mounts]
+  source = "data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # The scheduler must keep polling even with no web traffic, so this instance
+  # never stops. It is also the reason to keep min_machines_running at 1.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/healthz"
+
+# One shared CPU with 512MB comfortably handles a few thousand monitors.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
